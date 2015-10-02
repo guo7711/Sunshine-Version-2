@@ -4,9 +4,12 @@ package com.example.android.sunshine.app;
  * Created by guo7711 on 10/1/2015.
  */
 
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.preference.PreferenceManager;
 import android.support.v4.app.Fragment;
 import android.text.format.Time;
 import android.util.Log;
@@ -16,6 +19,7 @@ import android.view.MenuInflater;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 
@@ -31,8 +35,6 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
 
 /**
  * A placeholder fragment containing a simple view.
@@ -60,18 +62,30 @@ public class ForecastFragment extends Fragment {
     public boolean onOptionsItemSelected(MenuItem item){
         int id = item.getItemId();
         if (id == R.id.action_refresh){
-            FetchWeatherTask task = new FetchWeatherTask();
-            task.execute("91773");
+            updateWeather();
             return true;
         }
         return super.onOptionsItemSelected(item);
     }
 
     @Override
+    public void onStart(){
+        super.onStart();
+        updateWeather();
+    }
+
+    private void updateWeather(){
+        FetchWeatherTask task = new FetchWeatherTask();
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
+        String location = prefs.getString(getString(R.string.pref_location_key), getString(R.string.pref_location_default));
+        task.execute(location);
+    }
+
+    @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
 
-        // Create some dummy data for the ListView.  Here's a sample weekly forecast
+        /*// Create some dummy data for the ListView.  Here's a sample weekly forecast
         String[] data = {
                 "Mon 6/23 - Sunny - 31/17",
                 "Tue 6/24 - Foggy - 21/8",
@@ -84,8 +98,7 @@ public class ForecastFragment extends Fragment {
 
 
 
-        List<String> weekForecast = new ArrayList<String>(Arrays.asList(data));
-
+        List<String> weekForecast = new ArrayList<String>(Arrays.asList(data));*/
 
         // Now that we have some dummy forecast data, create an ArrayAdapter.
         // The ArrayAdapter will take data from a source (like our dummy forecast) and
@@ -95,28 +108,46 @@ public class ForecastFragment extends Fragment {
                         getActivity(), // The current context (this activity)
                         R.layout.list_item_forecast, // The name of the layout ID.
                         R.id.list_item_forecast_textview, // The ID of the textview to populate.
-                        weekForecast);
+                        new ArrayList<String>());
 
         View rootView = inflater.inflate(R.layout.fragment_main, container, false);
 
         // Get a reference to the ListView, and attach this adapter to it.
         ListView listView = (ListView) rootView.findViewById(R.id.listview_forecast);
         listView.setAdapter(mForecastAdapter);
+        listView.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override
+            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                String forecast = mForecastAdapter.getItem(position);
+                //Toast.makeText(getActivity(), forecast, Toast.LENGTH_SHORT).show();
+                Intent intent = new Intent(getActivity(), DetailActivity.class).putExtra(Intent.EXTRA_TEXT, forecast);
+                startActivity(intent);
+            }
+        });
 
         return rootView;
     }
 
-    public class FetchWeatherTask extends AsyncTask<String, Void, Void>
+    public class FetchWeatherTask extends AsyncTask<String, Void, String[]>
     {
         final String LOG_TAG = this.getClass().getSimpleName();
+
         @Override
-       protected Void doInBackground(String... params){
+        protected void onPostExecute(String[] strings) {
+            if (strings != null){
+                mForecastAdapter.clear();
+                for (String day : strings){
+                    mForecastAdapter.add(day);
+                }
+            }
+        }
+
+        @Override
+        protected String[] doInBackground(String... params){
 
             if (params.length == 0){
                 return null;
             }
-
-
 
             HttpURLConnection urlConnection = null;
             BufferedReader reader = null;
@@ -146,7 +177,7 @@ public class ForecastFragment extends Fragment {
 
                 URL url = new URL(buildUri.toString());
 
-                Log.v(LOG_TAG, buildUri.toString());
+                //Log.v(LOG_TAG, buildUri.toString());
                 // Create the request to OpenWeatherMap, and open the connection
                 urlConnection = (HttpURLConnection) url.openConnection();
                 urlConnection.setRequestMethod("GET");
@@ -174,13 +205,21 @@ public class ForecastFragment extends Fragment {
                     return null;
                 }
                 forecastJsonStr = buffer.toString();
-                Log.v(LOG_TAG, "Forecast JSON String : " + forecastJsonStr);
+                //Log.v(LOG_TAG, "Forecast JSON String : " + forecastJsonStr);
+
+                try {
+                    return getWeatherDataFromJson(forecastJsonStr, numDays);
+                }
+                catch (JSONException e) {
+                    e.printStackTrace();
+                }
+
             } catch (IOException e) {
                 Log.e("PlaceholderFragment", "Error ", e);
                 // If the code didn't successfully get the weather data, there's no point in attemping
                 // to parse it.
                 return null;
-            } finally{
+            }  finally{
                 if (urlConnection != null) {
                     urlConnection.disconnect();
                 }
@@ -213,6 +252,23 @@ public class ForecastFragment extends Fragment {
          */
         private String formatHighLows(double high, double low) {
             // For presentation, assume the user doesn't care about tenths of a degree.
+
+            SharedPreferences sharedprefs = PreferenceManager.getDefaultSharedPreferences(getActivity());
+            String unitType = sharedprefs.getString(
+                    getString(R.string.pref_unit_key),
+                    getString(R.string.pref_unit_metric));
+
+            if (unitType.equals(getString(R.string.pref_unit_imperial))){
+                high = (high * 1.8) + 32;
+                low = (low * 1.8) + 32;
+            }
+            else if (unitType.equals(getString(R.string.pref_unit_metric))){
+
+            }
+            else {
+                Log.d(LOG_TAG, "Unit Type not found: " + unitType);
+            }
+
             long roundedHigh = Math.round(high);
             long roundedLow = Math.round(low);
 
@@ -291,7 +347,7 @@ public class ForecastFragment extends Fragment {
             }
 
             for (String s : resultStrs) {
-                Log.v(LOG_TAG, "Forecast entry: " + s);
+               // Log.v(LOG_TAG, "Forecast entry: " + s);
             }
             return resultStrs;
 
